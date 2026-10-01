@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-16"?>
+<UserConfig>
+	<Group id="modAdjustableFOV" displayName="Mods.modAdjustableFOV">
+		<PresetsArray>
+			<Preset id="0" displayName="mod_default">
+				<Entry varId="mod_adjusted_fov" value="0"/>
+			</Preset>
+		</PresetsArray>
+		<VisibleVars>
+			<Var id="mod_adjusted_fov" displayName="mod_adjusted_fov" displayType="SLIDER;-25.0;25.0;50"/>
+		</VisibleVars>
+	</Group>
+</UserConfig>
