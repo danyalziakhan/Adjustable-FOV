@@ -49,13 +49,28 @@
 		topmost.fov = fov;
 }
 
+// DampFloatSpring's out arguments don't write back here
 @addMethod( CR4Player ) public function ModAdjustableFOVApply( dt : float, widen : bool )
 {
+	var x, decay, diff, temp : float;
+
 	if( modFovCurrent <= 0 )
 		modFovCurrent = ModAdjustableFOVTarget( false );
 
-	DampFloatSpring( modFovCurrent, modFovVelocity, ModAdjustableFOVTarget( widen ), 1.0, dt );
+	x = 2.0 * dt;
+	decay = 1.0 / ( 1.0 + x + 0.48 * x * x + 0.235 * x * x * x );
+	diff = modFovCurrent - ModAdjustableFOVTarget( widen );
+	temp = ( modFovVelocity + 2.0 * diff ) * dt;
+	modFovVelocity = ( modFovVelocity - 2.0 * temp ) * decay;
+	modFovCurrent = ModAdjustableFOVTarget( widen ) + ( diff + temp ) * decay;
+
 	ModAdjustableFOVWrite( modFovCurrent );
+}
+
+// vanilla's sprint camera condition, minus combat
+@addMethod( CR4Player ) public function ModAdjustableFOVWiden() : bool
+{
+	return sprintingCamera && !IsInCombat() && !GetExplCamera() && !GetCmbtCamera() && !IsModernExplorationCamera();
 }
 
 @addMethod( CR4Player ) public function ModAdjustableFOVSnap()
@@ -96,7 +111,7 @@
 	var result : bool;
 
 	result = wrappedMethod( moveData, dt );
-	parent.ModAdjustableFOVApply( dt, parent.GetIsSprinting() );
+	parent.ModAdjustableFOVApply( dt, parent.ModAdjustableFOVWiden() );
 
 	return result;
 }
@@ -106,7 +121,7 @@
 	var result : bool;
 
 	result = wrappedMethod( moveData, dt );
-	parent.ModAdjustableFOVApply( dt, parent.GetIsSprinting() );
+	parent.ModAdjustableFOVApply( dt, parent.ModAdjustableFOVWiden() );
 
 	return result;
 }
