@@ -1,20 +1,54 @@
-@addField( CR4Player ) private var modFovAdjusted : float;
-@addField( CR4Player ) private var modFovCurrent : float;
-@addField( CR4Player ) private var modFovVelocity : float;
-
-// vanilla FOV is 60, 70 while sprinting
-@addMethod( CR4Player ) public function ModAdjustableFOVTarget( widen : bool ) : float
+// one camera's vanilla fov and our written value
+class ModAdjustableFOVSlot
 {
-	var target : float;
+	var cam : CCustomCamera;
+	var raw : float;
+	var written : float;
+	var valid : bool;
 
-	target = modFovAdjusted;
-	if( target <= 0 )
-		target = 60;
+	function Raw( getterValid : bool, getterValue : float, getterOffset : float ) : float
+	{
+		var fov : float;
 
-	if( widen )
-		target += 10;
+		fov = cam.fov;
+		if( valid && AbsF( fov - written ) < 0.05 )
+			return raw;
 
-	return target;
+		// getter values already carry the offset
+		if( getterValid && AbsF( fov - getterValue ) < 0.05 )
+			return fov - getterOffset;
+
+		return fov;
+	}
+
+	function Write( fov : float )
+	{
+		if( AbsF( cam.fov - fov ) > 0.001 )
+			cam.fov = fov;
+	}
+}
+
+@addField( CR4Player ) private var modFovOffset : float;
+@addField( CR4Player ) private var modFovDepth : int;
+@addField( CR4Player ) private var modFovGame : ModAdjustableFOVSlot;
+@addField( CR4Player ) private var modFovTop : ModAdjustableFOVSlot;
+@addField( CR4Player ) private var modFovGameActive : bool;
+@addField( CR4Player ) private var modFovTopActive : bool;
+@addField( CR4Player ) private var modFovTopWasActive : bool;
+@addField( CR4Player ) private var modFovGetterValid : bool;
+@addField( CR4Player ) private var modFovGetterValue : float;
+@addField( CR4Player ) private var modFovGetterOffset : float;
+
+// the player is rebuilt on load, the game camera isn't
+@addField( CR4Game ) public var modFovSavedValid : bool;
+@addField( CR4Game ) public var modFovSavedRaw : float;
+@addField( CR4Game ) public var modFovSavedWritten : float;
+
+@addMethod( CR4Game ) public function ModAdjustableFOVSave( raw : float, written : float )
+{
+	modFovSavedValid = true;
+	modFovSavedRaw = raw;
+	modFovSavedWritten = written;
 }
 
 // same range as the slider in modAdjustableFOV.xml
@@ -22,11 +56,11 @@
 {
 	var previous : float;
 
-	previous = modFovAdjusted;
-	modFovAdjusted = 60 + ClampF( StringToFloat( value ), -25, 25 );
+	previous = modFovOffset;
+	modFovOffset = ClampF( StringToFloat( value ), -25, 25 );
 
-	if( modFovAdjusted != previous )
-		ModAdjustableFOVSnap();
+	if( modFovOffset != previous )
+		ModAdjustableFOVNormalize();
 }
 
 @addMethod( CR4Player ) public function ModAdjustableFOVLoad()
@@ -34,57 +68,137 @@
 	ModAdjustableFOVSetFromString( theGame.GetInGameConfigWrapper().GetVarValue( 'modAdjustableFOV', 'mod_adjusted_fov' ) );
 }
 
-// writing fov disturbs camera blends
-@addMethod( CR4Player ) private function ModAdjustableFOVWrite( fov : float )
+@addMethod( CR4Player ) private function ModAdjustableFOVSlots()
 {
 	var gameCamera : CCustomCamera;
 	var topmost : CCustomCamera;
+	var active : bool;
+
+	if( !modFovGame )
+		modFovGame = new ModAdjustableFOVSlot in this;
+	if( !modFovTop )
+		modFovTop = new ModAdjustableFOVSlot in this;
 
 	gameCamera = theGame.GetGameCamera();
-	if( gameCamera && AbsF( gameCamera.fov - fov ) > 0.01 )
-		gameCamera.fov = fov;
+	if( modFovGame.cam != gameCamera )
+	{
+		modFovGame.cam = gameCamera;
+		modFovGame.valid = false;
 
+		if( gameCamera && theGame.modFovSavedValid && AbsF( gameCamera.fov - theGame.modFovSavedWritten ) < 0.05 )
+		{
+			modFovGame.valid = true;
+			modFovGame.raw = theGame.modFovSavedRaw;
+			modFovGame.written = theGame.modFovSavedWritten;
+		}
+	}
+	modFovGameActive = false;
+	if( gameCamera )
+		modFovGameActive = true;
+
+	// the horse camera copies the game camera's fov
 	topmost = (CCustomCamera)theCamera.GetTopmostCameraObject();
-	if( topmost && AbsF( topmost.fov - fov ) > 0.01 )
-		topmost.fov = fov;
+	active = gameCamera && topmost && topmost != gameCamera;
+	if( active && ( !modFovTopWasActive || modFovTop.cam != topmost ) )
+	{
+		if( modFovTop.cam != topmost )
+			modFovTop.valid = false;
+		modFovTop.cam = topmost;
+
+		if( modFovGame.valid && AbsF( topmost.fov - modFovGame.written ) < 0.05 )
+		{
+			modFovTop.valid = true;
+			modFovTop.raw = modFovGame.raw;
+			modFovTop.written = modFovGame.written;
+		}
+	}
+	modFovTopWasActive = active;
+	modFovTopActive = active;
 }
 
-// DampFloatSpring's out arguments don't write back here
-@addMethod( CR4Player ) public function ModAdjustableFOVApply( dt : float, widen : bool )
+@addMethod( CR4Player ) private function ModAdjustableFOVPut( slot : ModAdjustableFOVSlot )
 {
-	var x, decay, diff, temp : float;
+	slot.written = slot.raw + modFovOffset;
+	slot.valid = true;
+	slot.Write( slot.written );
 
-	if( modFovCurrent <= 0 )
-		modFovCurrent = ModAdjustableFOVTarget( false );
-
-	x = 2.0 * dt;
-	decay = 1.0 / ( 1.0 + x + 0.48 * x * x + 0.235 * x * x * x );
-	diff = modFovCurrent - ModAdjustableFOVTarget( widen );
-	temp = ( modFovVelocity + 2.0 * diff ) * dt;
-	modFovVelocity = ( modFovVelocity - 2.0 * temp ) * decay;
-	modFovCurrent = ModAdjustableFOVTarget( widen ) + ( diff + temp ) * decay;
-
-	ModAdjustableFOVWrite( modFovCurrent );
+	if( slot == modFovGame )
+		theGame.ModAdjustableFOVSave( slot.raw, slot.written );
 }
 
-// vanilla's sprint camera condition, minus combat
-@addMethod( CR4Player ) public function ModAdjustableFOVWiden() : bool
+@addMethod( CR4Player ) private function ModAdjustableFOVRestore( slot : ModAdjustableFOVSlot )
 {
-	return sprintingCamera && !IsInCombat() && !GetExplCamera() && !GetCmbtCamera() && !IsModernExplorationCamera();
+	slot.raw = slot.Raw( modFovGetterValid, modFovGetterValue, modFovGetterOffset );
+	slot.Write( slot.raw );
 }
 
-@addMethod( CR4Player ) public function ModAdjustableFOVSnap()
+// vanilla springs its own fov inside a camera tick
+@addMethod( CR4Player ) public function ModAdjustableFOVBegin()
 {
-	modFovCurrent = ModAdjustableFOVTarget( false );
-	modFovVelocity = 0;
-	ModAdjustableFOVWrite( modFovCurrent );
+	if( modFovDepth == 0 )
+	{
+		ModAdjustableFOVSlots();
+		if( modFovGameActive )
+			ModAdjustableFOVRestore( modFovGame );
+		if( modFovTopActive )
+			ModAdjustableFOVRestore( modFovTop );
+	}
+
+	modFovDepth += 1;
 }
 
-// MountHorse has no camera hook
-@addMethod( CR4Player ) timer function ModAdjustableFOVCatchUp( dt : float, id : int )
+@addMethod( CR4Player ) public function ModAdjustableFOVEnd()
 {
-	if( GetCurrentStateName() == 'MountHorse' )
-		ModAdjustableFOVSnap();
+	modFovDepth -= 1;
+	if( modFovDepth > 0 )
+		return;
+
+	modFovDepth = 0;
+	if( modFovGameActive && modFovGame.cam )
+	{
+		modFovGame.raw = modFovGame.cam.fov;
+		ModAdjustableFOVPut( modFovGame );
+	}
+	if( modFovTopActive && modFovTop.cam )
+	{
+		modFovTop.raw = modFovTop.cam.fov;
+		ModAdjustableFOVPut( modFovTop );
+	}
+}
+
+// writes outside a camera tick
+@addMethod( CR4Player ) public function ModAdjustableFOVNormalize()
+{
+	if( modFovDepth > 0 )
+		return;
+
+	ModAdjustableFOVSlots();
+	if( modFovGameActive && modFovGame.cam )
+	{
+		modFovGame.raw = modFovGame.Raw( modFovGetterValid, modFovGetterValue, modFovGetterOffset );
+		ModAdjustableFOVPut( modFovGame );
+	}
+	if( modFovTopActive && modFovTop.cam )
+	{
+		modFovTop.raw = modFovTop.Raw( modFovGetterValid, modFovGetterValue, modFovGetterOffset );
+		ModAdjustableFOVPut( modFovTop );
+	}
+}
+
+// vanilla leaves the game camera at its sprint fov
+@addMethod( CR4Player ) public function ModAdjustableFOVDismount()
+{
+	fovVel = 0;
+
+	if( !modFovGetterValid || modFovDepth > 0 )
+		return;
+
+	ModAdjustableFOVSlots();
+	if( !modFovGameActive || !modFovGame.cam )
+		return;
+
+	modFovGame.raw = modFovGetterValue - modFovGetterOffset;
+	ModAdjustableFOVPut( modFovGame );
 }
 
 @wrapMethod( CR4Player ) function OnSpawned( spawnData : SEntitySpawnData )
@@ -92,26 +206,33 @@
 	var result : bool;
 
 	result = wrappedMethod( spawnData );
-
 	ModAdjustableFOVLoad();
-	AddTimer( 'ModAdjustableFOVCatchUp', 0, true );
 
 	return result;
 }
 
-// vanilla sets this on dismount
+// offset only for sets outside a camera tick
 @wrapMethod( CR4Player ) function GetExplorationCameraFov() : float
 {
-	wrappedMethod();
-	return ModAdjustableFOVTarget( false );
+	var fov : float;
+
+	fov = wrappedMethod();
+	if( modFovDepth > 0 )
+		return fov;
+
+	modFovGetterValid = true;
+	modFovGetterValue = fov + modFovOffset;
+	modFovGetterOffset = modFovOffset;
+	return modFovGetterValue;
 }
 
 @wrapMethod( CR4PlayerStateExploration ) function OnGameCameraPostTick( out moveData : SCameraMovementData, dt : float )
 {
 	var result : bool;
 
+	parent.ModAdjustableFOVBegin();
 	result = wrappedMethod( moveData, dt );
-	parent.ModAdjustableFOVApply( dt, parent.ModAdjustableFOVWiden() );
+	parent.ModAdjustableFOVEnd();
 
 	return result;
 }
@@ -120,8 +241,9 @@
 {
 	var result : bool;
 
+	parent.ModAdjustableFOVBegin();
 	result = wrappedMethod( moveData, dt );
-	parent.ModAdjustableFOVApply( dt, parent.ModAdjustableFOVWiden() );
+	parent.ModAdjustableFOVEnd();
 
 	return result;
 }
@@ -130,10 +252,9 @@
 {
 	var result : bool;
 
+	parent.ModAdjustableFOVBegin();
 	result = wrappedMethod( moveData, dt );
-
-	if( parent.GetCurrentStateName() != 'HorseRiding' )
-		parent.ModAdjustableFOVApply( dt, false );
+	parent.ModAdjustableFOVEnd();
 
 	return result;
 }
@@ -142,28 +263,19 @@
 {
 	var result : bool;
 
+	parent.ModAdjustableFOVBegin();
 	result = wrappedMethod( moveData, dt );
-	parent.ModAdjustableFOVSnap();
+	parent.ModAdjustableFOVEnd();
 
 	return result;
 }
 
-@wrapMethod( CR4PlayerStateHorseRiding ) function OnEnterState( prevStateName : name )
-{
-	var result : bool;
-
-	result = wrappedMethod( prevStateName );
-	parent.ModAdjustableFOVSnap();
-
-	return result;
-}
-
-@wrapMethod( CR4PlayerStateAimThrow ) function OnLeaveState( nextStateName : name )
+@wrapMethod( CR4PlayerStateHorseRiding ) function OnLeaveState( nextStateName : name )
 {
 	var result : bool;
 
 	result = wrappedMethod( nextStateName );
-	parent.ModAdjustableFOVSnap();
+	parent.ModAdjustableFOVDismount();
 
 	return result;
 }

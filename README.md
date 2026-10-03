@@ -3,10 +3,11 @@
 A Witcher 3 mod that adds a field of view slider to the Mods menu. The game
 ships without an FOV option, so this adds one.
 
-The slider runs from -25 to +25 and is applied on top of the vanilla FOV of 60
-(70 while sprinting). Leaving it at 0 gives you the stock camera. Changes apply
-as soon as you move the slider, and the FOV holds through combat, aiming, and
-mounting, riding or dismounting a horse.
+The slider runs from -25 to +25 and widens or narrows the view by that amount
+everywhere: exploring, combat, aiming and horse riding. Whatever FOV the game
+would use in a given moment, including its camera presets and the sprint
+widening, keeps working and gets the same offset on top. Leaving it at 0 gives
+you the stock camera. Changes apply as soon as you move the slider.
 
 There is one slider rather than one per state, so it feels like it was natively
 part of the game, the way CD Projekt RED would have implemented it.
