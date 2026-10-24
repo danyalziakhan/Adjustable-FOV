@@ -57,7 +57,7 @@ class ModAdjustableFOVSlot
 	var previous : float;
 
 	previous = modFovOffset;
-	modFovOffset = ClampF( StringToFloat( value ), -25, 25 );
+	modFovOffset = ClampF( StringToFloat( value ), -25, 60 );
 
 	if( modFovOffset != previous )
 		ModAdjustableFOVNormalize();

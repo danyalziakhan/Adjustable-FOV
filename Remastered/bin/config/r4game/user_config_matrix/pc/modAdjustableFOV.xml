@@ -7,7 +7,7 @@
 			</Preset>
 		</PresetsArray>
 		<VisibleVars>
-			<Var id="mod_adjusted_fov" displayName="mod_adjusted_fov" displayType="SLIDER;-25.0;25.0;50"/>
+			<Var id="mod_adjusted_fov" displayName="mod_adjusted_fov" displayType="SLIDER;-25.0;60.0;85"/>
 		</VisibleVars>
 	</Group>
 </UserConfig>
